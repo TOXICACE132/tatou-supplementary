@@ -1,13 +1,7 @@
 name: Mutation Testing
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
-  schedule:
-    - cron: "0 3 * * *"  # 每天凌晨3点自动跑一次全量
 
 concurrency:
   group: mutation-${{ github.ref }}
