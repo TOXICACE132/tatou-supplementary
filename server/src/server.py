@@ -69,13 +69,86 @@ def db_url(app) -> str:
         f"mysql+pymysql://{app.config['DB_USER']}:{app.config['DB_PASSWORD']}"
         f"@{app.config['DB_HOST']}:{app.config['DB_PORT']}/{app.config['DB_NAME']}?charset=utf8mb4"
     )
+TEST_MODE = os.environ.get("TEST_MODE") == "1"
 
 def get_engine(app):
     eng = app.config.get("_ENGINE")
-    if eng is None:
+    if eng is not None:
+        return eng
+
+    if TEST_MODE:
+        # SQLite for tests (no MySQL/docker dependency)
+        eng = create_engine(
+            "sqlite:///:memory:",
+            future=True,
+            connect_args={"check_same_thread": False},
+        )
+        _init_sqlite_compat(eng)
+        _init_test_schema(eng)
+    else:
         eng = create_engine(db_url(app), pool_pre_ping=True, future=True)
-        app.config["_ENGINE"] = eng
+
+    app.config["_ENGINE"] = eng
     return eng
+
+def _init_sqlite_compat(engine):
+    """
+    SQLite compatibility for MySQL functions used in SQL:
+    - UNHEX('a1b2') -> bytes
+    - HEX(blob) -> 'A1B2'
+    """
+    import binascii
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def _sqlite_on_connect(dbapi_conn, _):
+        try:
+            dbapi_conn.create_function(
+                "UNHEX", 1, lambda s: None if s is None else binascii.unhexlify(s)
+            )
+            dbapi_conn.create_function(
+                "HEX", 1, lambda b: None if b is None else binascii.hexlify(b).decode("ascii").upper()
+            )
+        except Exception:
+            pass
+
+def _init_test_schema(engine):
+    """Initialize minimal schema for TEST_MODE (SQLite) matching current SQL usage."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS Users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT UNIQUE,
+                login TEXT UNIQUE,
+                hpassword TEXT
+            );
+        """))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS Documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                path TEXT,
+                ownerid INTEGER,
+                sha256 BLOB,
+                size INTEGER,
+                creation TEXT DEFAULT (datetime('now'))
+            );
+        """))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS Versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                documentid INTEGER,
+                link TEXT UNIQUE,
+                intended_for TEXT,
+                secret TEXT,
+                method TEXT,
+                position TEXT,
+                path TEXT
+            );
+        """))
+
 
 def _serializer(app):
     return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")

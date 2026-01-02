@@ -11,3 +11,4 @@ pytest-cov
 mutmut
 pytest-xdist
 requests
+pytest-mock
