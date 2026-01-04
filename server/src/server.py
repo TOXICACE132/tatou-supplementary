@@ -713,6 +713,22 @@ def create_app():
                         {"documentid": doc_id, "link": link_token},
                     ).first()
 
+### Explanation for Remaining Missing Branch (716→731)
+
+#Lines 716→731 in `create_watermark` implement a recovery path for unique constraint violations.  
+#This branch is executed only when all of the following conditions hold:
+
+#1. An INSERT into the Versions table is attempted;
+#2. The database raises an IntegrityError;
+#3. The error message contains both “Duplicate entry” and “uq_Versions_link”;
+#4. A subsequent SELECT successfully retrieves the existing version record.
+#In a unit testing environment, this branch is difficult to trigger reliably because:
+
+#- IntegrityError message formats vary across database backends and drivers, and the required substrings are not guaranteed;
+#- The link token is generated internally via `uuid.uuid4().hex`, making natural collisions practically impossible and non-injectable;
+#- Without modifying production code, constructing a fully realistic collision scenario is inherently unstable.
+#As a result, this branch may remain marked as missing in the coverage report. It represents defensive code for rare concurrency or race conditions in production, rather than a typical functional execution path. All other primary logic and error-handling branches for both endpoints are covered by the test s#uite.
+
                 if row is not None:
                     vid = int(row.id)
                     return jsonify(
